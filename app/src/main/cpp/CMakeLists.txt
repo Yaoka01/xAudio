@@ -1,11 +1,7 @@
-cmake_minimum_required(VERSION 3.22.1)
-project("xaudio")
+cmake_minimum_required(VERSION 3.10)
 
-# Deklarasi library native
-add_library(xaudio_engine SHARED audio_pusher.cpp)
+add_library(native-audio SHARED native-audio.cpp)
 
-# Cari library log Android
 find_library(log-lib log)
 
-# Link library log ke engine kita
-target_link_libraries(xaudio_engine ${log-lib} android)
+target_link_libraries(native-audio ${log-lib})
