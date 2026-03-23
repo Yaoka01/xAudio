@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.22.1)
 project("xaudio")
 
-# Mendeklarasikan file C++ kita
+# Deklarasi library native
 add_library(xaudio_engine SHARED audio_pusher.cpp)
 
-# Memasukkan library log bawaan Android biar kita bisa nge-print tulisan
+# Cari library log Android
 find_library(log-lib log)
 
-# Menyatukan semuanya
-target_link_libraries(xaudio_engine ${log-lib})
+# Link library log ke engine kita
+target_link_libraries(xaudio_engine ${log-lib} android)
