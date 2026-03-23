@@ -55,15 +55,13 @@ class MainActivity : AppCompatActivity() {
     private fun openAndPlay(device: UsbDevice) {
         val connection = usbManager.openDevice(device) ?: return
         
-        // Cari Interface yang punya EP OUT
-        // CX31993 biasanya punya Streaming di Interface 2 atau 3
         var targetIntf: android.hardware.usb.UsbInterface? = null
         var targetEp: android.hardware.usb.UsbEndpoint? = null
 
+        // Kita cari interface yang beneran buat Streaming (Subclass 2)
         for (i in 0 until device.interfaceCount) {
             val intf = device.getInterface(i)
-            // Cari Interface Audio (Class 1)
-            if (intf.interfaceClass == 1) {
+            if (intf.interfaceClass == 1 && intf.interfaceSubclass == 2) {
                 for (j in 0 until intf.endpointCount) {
                     val ep = intf.getEndpoint(j)
                     if (ep.direction == UsbConstants.USB_DIR_OUT) {
@@ -77,12 +75,18 @@ class MainActivity : AppCompatActivity() {
         if (targetIntf != null && targetEp != null) {
             connection.claimInterface(targetIntf, true)
 
-            // MANTRA: Set Alternate Setting 1 (WAJIB buat CX31993)
-            connection.controlTransfer(0x01, 0x0B, 1, targetIntf.id, null, 0, 100)
+            // COBA MANTRA 2 (Alternate Setting 2)
+            // Banyak DAC 384kHz cuma mau bunyi kalau diset ke mode bandwidth tertinggi (2)
+            val requestType = 0x01 // Host to Interface
+            val request = 0x0B     // SET_INTERFACE
+            val value = 2          // Alternate Setting 2 (Ubah ke 1 atau 3 kalau gagal)
+            val index = targetIntf.id
+            
+            connection.controlTransfer(requestType, request, value, index, null, 0, 100)
 
             isPlaying = true
             btnPlay.text = "STOP AUDIO"
-            tvStatus.text = "TESTING BYPASS...\nIntf: ${targetIntf.id}\nEP: ${targetEp.address}\nPacket: ${targetEp.maxPacketSize}"
+            tvStatus.text = "FORCE BYPASS MODE 2\nIntf: ${targetIntf.id}\nEP: ${targetEp.address}\nPacket: ${targetEp.maxPacketSize}"
 
             Thread {
                 val sampleRate = 44100
@@ -93,19 +97,19 @@ class MainActivity : AppCompatActivity() {
 
                 while (isPlaying) {
                     for (i in 0 until bufferSize step 2) {
-                        val value = (sin(phase) * 32767).toInt()
-                        buffer[i] = (value and 0xFF).toByte()
-                        buffer[i + 1] = (value shr 8).toByte()
+                        val valueSine = (sin(phase) * 32767).toInt()
+                        buffer[i] = (valueSine and 0xFF).toByte()
+                        buffer[i + 1] = (valueSine shr 8).toByte()
                         phase += 2.0 * PI * freq / sampleRate
                     }
-                    // Tembakkan langsung!
+                    // Tembak tanpa henti
                     connection.bulkTransfer(targetEp, buffer, bufferSize, 0)
                 }
                 connection.releaseInterface(targetIntf)
                 connection.close()
             }.start()
         } else {
-            tvStatus.text = "Gagal nemu jalur Audio OUT"
+            tvStatus.text = "Jalur Streaming Tidak Ditemukan"
             connection.close()
         }
     }
