@@ -9,18 +9,30 @@
 #define LOG_TAG "xAudio_Native"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 
+// MANUAL DEFINE karena NDK lama tidak punya ini
+#ifndef USBDEVFS_DISCONNECTIF
+struct usbdevfs_disconnectif {
+    unsigned int interface;
+    unsigned int flags;
+};
+#define USBDEVFS_DISCONNECTIF _IOR('U', 27, struct usbdevfs_disconnectif)
+#endif
+
+#ifndef USBDEVFS_DISCONNECT_IF_DRIVER_IF_BOUND
+#define USBDEVFS_DISCONNECT_IF_DRIVER_IF_BOUND 0x01
+#endif
+
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_xaudio_MainActivity_startBypass(JNIEnv* env, jobject thiz, jint fd, jint interface_id, jint endpoint_addr) {
     
-    // 1. Tendang Driver Kernel bawaan iQOO
+    // 1. Tendang Driver Kernel (Pakai definisi manual tadi)
     struct usbdevfs_disconnectif disc;
     disc.interface = (unsigned int)interface_id;
     disc.flags = USBDEVFS_DISCONNECT_IF_DRIVER_IF_BOUND;
     ioctl(fd, USBDEVFS_DISCONNECTIF, &disc);
 
-    // 2. Klaim Interface secara paksa
+    // 2. Klaim Interface
     if (ioctl(fd, USBDEVFS_CLAIMINTERFACE, &interface_id) < 0) {
-        LOGI("[-] Gagal Klaim Interface");
         return env->NewStringUTF("[-] ERROR: Gagal Klaim Interface");
     }
 
@@ -28,14 +40,11 @@ Java_com_xaudio_MainActivity_startBypass(JNIEnv* env, jobject thiz, jint fd, jin
     struct usbdevfs_setinterface setintf;
     setintf.interface = (unsigned int)interface_id;
     setintf.altsetting = 1;
-    if (ioctl(fd, USBDEVFS_SETINTERFACE, &setintf) < 0) {
-        LOGI("[-] Gagal Set Interface");
-    }
+    ioctl(fd, USBDEVFS_SETINTERFACE, &setintf);
 
     // 4. Injeksi Sine Wave (Audio Test)
     unsigned char buffer[384];
     double phase = 0.0;
-    // Loop sekitar 3 detik
     for (int i = 0; i < 3000; i++) {
         for (int j = 0; j < 384; j += 2) {
             short sample = (short)(sin(phase) * 30000);
@@ -50,9 +59,8 @@ Java_com_xaudio_MainActivity_startBypass(JNIEnv* env, jobject thiz, jint fd, jin
         bulk.timeout = 1000;
         bulk.data = buffer;
 
-        // Tembak langsung ke Hardware
         ioctl(fd, USBDEVFS_BULK, &bulk);
-        usleep(1000); // Sinkronisasi manual
+        usleep(1000); 
     }
 
     return env->NewStringUTF("[+] BERHASIL: Injeksi Selesai!");
