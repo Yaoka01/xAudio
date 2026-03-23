@@ -1,85 +1,59 @@
 #include <jni.h>
 #include <string>
-#include <unistd.h>
 #include <sys/ioctl.h>
 #include <linux/usbdevice_fs.h>
-#include <android/log.h>
+#include <unistd.h>
 #include <math.h>
-#include <vector>
+#include <android/log.h>
 
-#define LOG_TAG "xaudio_engine"
+#define LOG_TAG "xAudio_Native"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_xaudio_MainActivity_startBypass(
-        JNIEnv* env,
-        jobject /* this */,
-        jint fd,
-        jint interface_id,
-        jint endpoint_addr) {
-
-    // 1. TENDANG DRIVER BAWAAN iQOO
+Java_com_xaudio_MainActivity_startBypass(JNIEnv* env, jobject thiz, jint fd, jint interface_id, jint endpoint_addr) {
+    
+    // 1. Tendang Driver Kernel bawaan iQOO
     struct usbdevfs_disconnectif disc;
-    disc.interface = interface_id;
+    disc.interface = (unsigned int)interface_id;
     disc.flags = USBDEVFS_DISCONNECT_IF_DRIVER_IF_BOUND;
     ioctl(fd, USBDEVFS_DISCONNECTIF, &disc);
 
-    // 2. KLAIM KENDALI PENUH
+    // 2. Klaim Interface secara paksa
     if (ioctl(fd, USBDEVFS_CLAIMINTERFACE, &interface_id) < 0) {
-        return env->NewStringUTF("[-] GAGAL: Interface terkunci sistem.");
+        LOGI("[-] Gagal Klaim Interface");
+        return env->NewStringUTF("[-] ERROR: Gagal Klaim Interface");
     }
 
-    // 3. SET MODE STREAMING (Alt Setting 1)
+    // 3. Mantra Bangun: Set Alternate Setting 1
     struct usbdevfs_setinterface setintf;
-    setintf.interface = interface_id;
-    setintf.altsetting = 1; 
-    ioctl(fd, USBDEVFS_SETINTERFACE, &setintf);
-
-    LOGI("[+] ENGINE START: Mengirim Asynchronous Isochronous Stream...");
-
-    // 4. SETUP URB (USB Request Block) - Cara UAPP
-    // Kita siapkan 8 paket audio sekaligus agar tidak putus
-    const int num_packets = 8;
-    const int packet_size = 384; 
-    unsigned char buffer[num_packets * packet_size];
-    
-    struct usbdevfs_urb urb;
-    memset(&urb, 0, sizeof(urb));
-    urb.type = USBDEVFS_URB_TYPE_ISO;
-    urb.endpoint = endpoint_addr;
-    urb.buffer = buffer;
-    urb.buffer_length = sizeof(buffer);
-    urb.number_of_packets = num_packets;
-
-    // Isi detail tiap paket
-    struct usbdevfs_iso_packet_desc packets[num_packets];
-    for (int i = 0; i < num_packets; ++i) {
-        packets[i].length = packet_size;
-        urb.iso_frame_desc[i].length = packet_size;
+    setintf.interface = (unsigned int)interface_id;
+    setintf.altsetting = 1;
+    if (ioctl(fd, USBDEVFS_SETINTERFACE, &setintf) < 0) {
+        LOGI("[-] Gagal Set Interface");
     }
 
-    // 5. TEMBAK! (Looping Sine Wave)
+    // 4. Injeksi Sine Wave (Audio Test)
+    unsigned char buffer[384];
     double phase = 0.0;
-    for (int loop = 0; loop < 2000; ++loop) {
-        // Isi buffer dengan Sine Wave
-        for (int i = 0; i < num_packets * packet_size; i += 2) {
-            short sample = (short)(sin(phase) * 32767);
-            buffer[i] = sample & 0xFF;
-            buffer[i+1] = (sample >> 8) & 0xFF;
-            phase += 2.0 * M_PI * 440.0 / 44100.0;
+    // Loop sekitar 3 detik
+    for (int i = 0; i < 3000; i++) {
+        for (int j = 0; j < 384; j += 2) {
+            short sample = (short)(sin(phase) * 30000);
+            buffer[j] = sample & 0xFF;
+            buffer[j+1] = (sample >> 8) & 0xFF;
+            phase += 2.0 * 3.14159 * 440.0 / 44100.0;
         }
 
-        // Kirim paket secara asinkron (Direct to Kernel)
-        if (ioctl(fd, USBDEVFS_SUBMITURB, &urb) < 0) {
-            return env->NewStringUTF("[-] ERROR: Kernel menolak URB Audio.");
-        }
-        
-        // Tunggu paket selesai dikirim
-        struct usbdevfs_urb *reaped_urb;
-        ioctl(fd, USBDEVFS_REAPURB, &reaped_urb);
-        
-        usleep(1000); // Sinkronisasi 1ms
+        struct usbdevfs_bulktransfer bulk;
+        bulk.ep = (unsigned int)endpoint_addr;
+        bulk.len = 384;
+        bulk.timeout = 1000;
+        bulk.data = buffer;
+
+        // Tembak langsung ke Hardware
+        ioctl(fd, USBDEVFS_BULK, &bulk);
+        usleep(1000); // Sinkronisasi manual
     }
 
-    return env->NewStringUTF("[+] BERHASIL! Jika masih hening, CX31993 butuh Sample Rate spesifik.");
+    return env->NewStringUTF("[+] BERHASIL: Injeksi Selesai!");
 }
