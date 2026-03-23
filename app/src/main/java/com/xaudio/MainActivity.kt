@@ -3,6 +3,7 @@ package com.xaudio
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.hardware.usb.UsbConstants
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Bundle
@@ -16,6 +17,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvStatus: TextView
     private lateinit var btnPlay: Button
 
+    // Deklarasi fungsi C++ (tetap dibiarkan agar tidak error, meski belum dipanggil di tahap ini)
     external fun startBypass(fd: Int, usbFs: String): String
 
     companion object {
@@ -23,7 +25,7 @@ class MainActivity : AppCompatActivity() {
             try {
                 System.loadLibrary("xaudio_engine")
             } catch (e: Exception) {
-                // Biar kalau C++ nya gagal muat, ketahuan
+                // Biarkan kosong
             }
         }
     }
@@ -56,7 +58,6 @@ class MainActivity : AppCompatActivity() {
                 openDevice(device)
             } else {
                 val intent = Intent("com.xaudio.USB_PERMISSION")
-                // INI DIA OBAT ANTI FORCE CLOSE UNTUK ANDROID 14:
                 intent.setPackage(packageName) 
                 
                 val pendingIntent = PendingIntent.getBroadcast(this, 0, intent, PendingIntent.FLAG_MUTABLE)
@@ -64,7 +65,6 @@ class MainActivity : AppCompatActivity() {
                 tvStatus.text = "[*] Meminta izin USB...\nKlik tombol lagi setelah diizinkan."
             }
         } catch (e: Exception) {
-            // Kalau error, cetak ke layar biar gampang di-debug
             tvStatus.text = "ERROR Kotlin: ${e.message}"
         }
     }
@@ -73,18 +73,55 @@ class MainActivity : AppCompatActivity() {
         try {
             val connection = usbManager.openDevice(device)
             if (connection != null) {
-                val fd = connection.fileDescriptor
-                val usbFs = device.deviceName 
+                var audioEndpointAddress = -1
+                var targetInterface: android.hardware.usb.UsbInterface? = null
+                val logInfo = java.lang.StringBuilder()
+
+                logInfo.append("[+] Koneksi sukses!\nMemindai Interface DAC...\n\n")
+
+                // Looping untuk mencari pintu "Audio Streaming"
+                for (i in 0 until device.interfaceCount) {
+                    val intf = device.getInterface(i)
+                    
+                    // 1 = Audio Class, 2 = Audio Streaming Subclass
+                    if (intf.interfaceClass == 1 && intf.interfaceSubclass == 2) {
+                        logInfo.append("-> Ditemukan Audio Streaming (Intf $i)\n")
+                        
+                        // Cari "Mulut" (Endpoint) yang arahnya KELUAR (Out)
+                        for (j in 0 until intf.endpointCount) {
+                            val ep = intf.getEndpoint(j)
+                            
+                            // Cek apakah ini Isochronous (Realtime) dan arahnya OUT (ke DAC)
+                            if (ep.direction == UsbConstants.USB_DIR_OUT && ep.type == UsbConstants.USB_ENDPOINT_XFER_ISOC) {
+                                audioEndpointAddress = ep.endpointAddress
+                                targetInterface = intf
+                                logInfo.append("   [!] Endpoint Audio OUT: $audioEndpointAddress\n")
+                                logInfo.append("   Max Packet Size: ${ep.maxPacketSize} bytes\n")
+                            }
+                        }
+                    }
+                }
+
+                if (targetInterface != null && audioEndpointAddress != -1) {
+                    // KUNCI PINTUNYA! Biar Android nggak bisa ikut campur
+                    val claimed = connection.claimInterface(targetInterface, true)
+                    if (claimed) {
+                        logInfo.append("\n[+] Interface berhasil dikunci!\n")
+                        logInfo.append("Siap menembakkan data ke Endpoint: $audioEndpointAddress")
+                    } else {
+                        logInfo.append("\n[-] Gagal mengunci Interface. Mungkin sedang dipakai sistem.")
+                    }
+                } else {
+                    logInfo.append("\n[-] Tidak menemukan Endpoint Audio Streaming.")
+                }
+
+                tvStatus.text = logInfo.toString()
                 
-                tvStatus.text = "[+] Koneksi sukses!\nFD: $fd | Path: $usbFs\nMengeksekusi C++ Driver..."
-                
-                val result = startBypass(fd, usbFs)
-                tvStatus.text = result
             } else {
-                tvStatus.text = "[-] Gagal buka koneksi ke DAC. Coba cabut-colok."
+                tvStatus.text = "[-] Gagal buka koneksi ke DAC."
             }
         } catch (e: Exception) {
-            tvStatus.text = "ERROR JNI/C++: ${e.message}"
+            tvStatus.text = "ERROR: ${e.message}"
         }
     }
 }
