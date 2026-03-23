@@ -33,7 +33,6 @@ class MainActivity : AppCompatActivity() {
             else {
                 isPlaying = false
                 btnPlay.text = "DETEKSI & BYPASS"
-                tvStatus.text = "Audio Berhenti."
             }
         }
     }
@@ -41,7 +40,7 @@ class MainActivity : AppCompatActivity() {
     private fun findAndConnectDAC() {
         val deviceList = usbManager.deviceList
         if (deviceList.isEmpty()) {
-            tvStatus.text = "DAC Tidak Terdeteksi.\nPastikan OTG aktif."
+            tvStatus.text = "DAC Tidak Terdeteksi"
             return
         }
         val device = deviceList.values.first()
@@ -50,87 +49,63 @@ class MainActivity : AppCompatActivity() {
         } else {
             val intent = PendingIntent.getBroadcast(this, 0, Intent("com.xaudio.USB_PERMISSION").apply { setPackage(packageName) }, PendingIntent.FLAG_MUTABLE)
             usbManager.requestPermission(device, intent)
-            tvStatus.text = "[*] Meminta izin USB..."
         }
     }
 
     private fun openAndPlay(device: UsbDevice) {
         val connection = usbManager.openDevice(device) ?: return
         
-        // SCAN ULANG: Cari Interface sakti yang punya Endpoint Audio OUT
-        // Kita simpan Interface-nya buat dikasih mantra bangun
-        var audioIntf: android.hardware.usb.UsbInterface? = null
-        var audioEp: android.hardware.usb.UsbEndpoint? = null
+        // Cari Interface yang punya EP OUT
+        // CX31993 biasanya punya Streaming di Interface 2 atau 3
+        var targetIntf: android.hardware.usb.UsbInterface? = null
+        var targetEp: android.hardware.usb.UsbEndpoint? = null
 
         for (i in 0 until device.interfaceCount) {
             val intf = device.getInterface(i)
-            for (j in 0 until intf.endpointCount) {
-                val ep = intf.getEndpoint(j)
-                // UsbConstants.USB_DIR_OUT = 0
-                if (ep.direction == UsbConstants.USB_DIR_OUT) {
-                    audioIntf = intf
-                    audioEp = ep
+            // Cari Interface Audio (Class 1)
+            if (intf.interfaceClass == 1) {
+                for (j in 0 until intf.endpointCount) {
+                    val ep = intf.getEndpoint(j)
+                    if (ep.direction == UsbConstants.USB_DIR_OUT) {
+                        targetIntf = intf
+                        targetEp = ep
+                    }
                 }
             }
         }
 
-        if (audioIntf != null && audioEp != null) {
-            // A. KLAIM/KUNCI INTERFACE (Wajib)
-            connection.claimInterface(audioIntf, true)
-            
-            // B. BOM MANTRA (SET_INTERFACE) - PENTING!
-            // Kita coba bombong DAC-nya dengan 3 mantra bangun yang beda:
-            // Mantra bRequest=0x0B (SET_INTERFACE)
-            
-            // Mantra 1: Coba Mode Aktif 1
-            connection.controlTransfer(0x01, 0x0B, 1, audioIntf.id, null, 0, 100)
-            
-            // Mantra 2: Coba Mode Aktif 2 (Beberapa DAC High-Res pakai ini)
-            // connection.controlTransfer(0x01, 0x0B, 2, audioIntf.id, null, 0, 100)
-            
-            // Mantra 3: Coba Mode Aktif 3
-            // connection.controlTransfer(0x01, 0x0B, 3, audioIntf.id, null, 0, 100)
+        if (targetIntf != null && targetEp != null) {
+            connection.claimInterface(targetIntf, true)
+
+            // MANTRA: Set Alternate Setting 1 (WAJIB buat CX31993)
+            connection.controlTransfer(0x01, 0x0B, 1, targetIntf.id, null, 0, 100)
 
             isPlaying = true
             btnPlay.text = "STOP AUDIO"
-            tvStatus.text = "[SUCCESS BYPASS]\n" +
-                           "Intf: ${audioIntf.id}\n" +
-                           "EP: ${audioEp.address} (DIR_OUT)\n" +
-                           "Packet: ${audioEp.maxPacketSize} bytes\n" +
-                           "Mantra Bangun 0x0B Terkirim."
+            tvStatus.text = "TESTING BYPASS...\nIntf: ${targetIntf.id}\nEP: ${targetEp.address}\nPacket: ${targetEp.maxPacketSize}"
 
-            // C. THREAD STREAMING PCM (Data lagu asli/Sine Wave)
             Thread {
                 val sampleRate = 44100
-                val freq = 440.0 // Nada A (Sine Wave murni)
+                val freq = 440.0
                 var phase = 0.0
-                val bufferSize = audioEp.maxPacketSize
+                val bufferSize = targetEp.maxPacketSize
                 val buffer = ByteArray(bufferSize)
 
                 while (isPlaying) {
-                    // Generate data audio Sine Wave di Kotlin (Pencitraan PCM)
                     for (i in 0 until bufferSize step 2) {
-                        // Formula Matematika Suara
                         val value = (sin(phase) * 32767).toInt()
-                        buffer[i] = (value and 0xFF).toByte()     // Little Endian
+                        buffer[i] = (value and 0xFF).toByte()
                         buffer[i + 1] = (value shr 8).toByte()
-                        
                         phase += 2.0 * PI * freq / sampleRate
-                        if (phase > 2.0 * PI) phase -= 2.0 * PI // Reset phase biar suaranya kontinu
                     }
-                    
-                    // Tembak data audio mentah ke DAC
-                    // Pakai bulkTransfer karena Android USB API menyatukan ISO Transfer ke sini
-                    // Timeout diset 0 (Non-blocking) agar tidak putus-putus
-                    connection.bulkTransfer(audioEp, buffer, bufferSize, 0)
+                    // Tembakkan langsung!
+                    connection.bulkTransfer(targetEp, buffer, bufferSize, 0)
                 }
-
-                // Bersihkan saat berhenti
-                connection.releaseInterface(audioIntf)
+                connection.releaseInterface(targetIntf)
                 connection.close()
             }.start()
         } else {
-            tvStatus.text = "[-] Gagal menemukan Jalur Audio OUT.\nCoba cabut-colok DAC."
+            tvStatus.text = "Gagal nemu jalur Audio OUT"
             connection.close()
         }
     }
