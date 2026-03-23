@@ -7,7 +7,7 @@
 #include <math.h>
 #include <vector>
 
-#define LOG_TAG "xAudio_Engine"
+#define LOG_TAG "xaudio_engine"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 
 extern "C" JNIEXPORT jstring JNICALL
