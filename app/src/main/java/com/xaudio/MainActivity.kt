@@ -15,28 +15,25 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         init {
-            // Nama ini HARUS sama dengan yang ada di CMakeLists.txt
             System.loadLibrary("xaudio_engine")
         }
     }
 
-    // Fungsi Bridge ke C++
     external fun startBypass(fd: Int, interfaceId: Int, endpointAddr: Int): String
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // UI Programmatic sederhana biar gak error layout
         val layout = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
             gravity = android.view.Gravity.CENTER
             setPadding(50, 50, 50, 50)
         }
         tvStatus = TextView(this).apply { 
-            text = "Status: Siap\nColok DAC & Klik Mulai"; 
+            text = "Status: Siap\nKlik tombol di bawah"; 
             textSize = 18f; textAlignment = android.view.View.TEXT_ALIGNMENT_CENTER 
         }
-        val btnPlay = Button(this).apply { text = "DETEKSI & BYPASS" }
+        val btnPlay = Button(this).apply { text = "BYPASS & PLAY TEST" }
         
         layout.addView(tvStatus)
         layout.addView(btnPlay)
@@ -59,13 +56,10 @@ class MainActivity : AppCompatActivity() {
         if (manager.hasPermission(device)) {
             val connection = manager.openDevice(device)
             if (connection != null) {
-                tvStatus.text = "[*] Menjalankan Native Engine..."
-                
                 Thread {
                     var targetIntfId = -1
                     var targetEpAddr = -1
 
-                    // Cari Jalur Audio OUT
                     for (i in 0 until device.interfaceCount) {
                         val intf = device.getInterface(i)
                         for (j in 0 until intf.endpointCount) {
@@ -78,21 +72,19 @@ class MainActivity : AppCompatActivity() {
                     }
 
                     if (targetIntfId != -1) {
-                        // Panggil C++
                         val result = startBypass(connection.fileDescriptor, targetIntfId, targetEpAddr)
                         runOnUiThread { 
                             tvStatus.text = result
                             connection.close()
                         }
                     } else {
-                        runOnUiThread { tvStatus.text = "[-] Jalur OUT Tidak Ditemukan" }
+                        runOnUiThread { tvStatus.text = "[-] Jalur OUT Gagal Ditemukan" }
                     }
                 }.start()
             }
         } else {
-            val intent = PendingIntent.getBroadcast(this, 0, Intent("USB_PERMISSION"), PendingIntent.FLAG_MUTABLE)
-            manager.requestPermission(device, intent)
-            tvStatus.text = "[*] Menunggu Izin USB..."
+            val pi = PendingIntent.getBroadcast(this, 0, Intent("USB"), PendingIntent.FLAG_MUTABLE)
+            manager.requestPermission(device, pi)
         }
     }
 }
