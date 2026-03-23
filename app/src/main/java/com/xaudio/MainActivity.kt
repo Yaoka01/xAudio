@@ -29,9 +29,8 @@ class MainActivity : AppCompatActivity() {
         btnPlay = findViewById(R.id.btnPlay)
 
         btnPlay.setOnClickListener {
-            if (!isPlaying) {
-                findAndConnectDAC()
-            } else {
+            if (!isPlaying) findAndConnectDAC()
+            else {
                 isPlaying = false
                 btnPlay.text = "DETEKSI & BYPASS"
             }
@@ -56,27 +55,37 @@ class MainActivity : AppCompatActivity() {
     private fun openAndPlay(device: UsbDevice) {
         val connection = usbManager.openDevice(device) ?: return
         
-        // Cari Interface yang punya Endpoint Audio OUT
-        // Kita coba Interface 4 dulu karena di log kamu Max Packet Size-nya paling gede (384)
-        val targetIntf = device.getInterface(device.interfaceCount - 1) 
-        val endpoint = targetIntf.getEndpoint(0)
+        var audioIntf: android.hardware.usb.UsbInterface? = null
+        var audioEp: android.hardware.usb.UsbEndpoint? = null
 
-        try {
-            connection.claimInterface(targetIntf, true)
+        // SCAN ULANG: Cari Interface yang punya Endpoint OUT (Arah ke Earphone)
+        for (i in 0 until device.interfaceCount) {
+            val intf = device.getInterface(i)
+            for (j in 0 until intf.endpointCount) {
+                val ep = intf.getEndpoint(j)
+                // UsbConstants.USB_DIR_OUT = 0 (Data keluar dari HP ke USB)
+                if (ep.direction == UsbConstants.USB_DIR_OUT) {
+                    audioIntf = intf
+                    audioEp = ep
+                }
+            }
+        }
 
-            // MANTRA: Set Alternate Setting ke 1 (Mode Aktif)
-            // Banyak DAC butuh ini buat 'buka gerbang' audio
-            connection.controlTransfer(0x01, 0x0B, 1, targetIntf.id, null, 0, 100)
+        if (audioIntf != null && audioEp != null) {
+            connection.claimInterface(audioIntf, true)
+            
+            // PAKSA AKTIF: Pindahkan ke Alternate Setting 1
+            connection.controlTransfer(0x01, 0x0B, 1, audioIntf.id, null, 0, 100)
 
             isPlaying = true
-            btnPlay.text = "STOP"
-            tvStatus.text = "STREAMING KE:\nIntf: ${targetIntf.id}\nEP: ${endpoint.address}\nPacket: ${endpoint.maxPacketSize}"
+            btnPlay.text = "STOP AUDIO"
+            tvStatus.text = "[SUCCESS]\nIntf: ${audioIntf.id}\nEP: ${audioEp.address} (DIR_OUT)\nPacket: ${audioEp.maxPacketSize}"
 
             Thread {
                 val sampleRate = 44100
-                var phase = 0.0
                 val freq = 440.0
-                val bufferSize = endpoint.maxPacketSize
+                var phase = 0.0
+                val bufferSize = audioEp.maxPacketSize
                 val buffer = ByteArray(bufferSize)
 
                 while (isPlaying) {
@@ -86,14 +95,15 @@ class MainActivity : AppCompatActivity() {
                         buffer[i + 1] = (value shr 8).toByte()
                         phase += 2.0 * PI * freq / sampleRate
                     }
-                    // Pakai bulkTransfer karena Android USB Host API menyatukan Isoc ke sini
-                    connection.bulkTransfer(endpoint, buffer, bufferSize, 0)
+                    // Transfer data ke hardware
+                    connection.bulkTransfer(audioEp, buffer, bufferSize, 0)
                 }
-                connection.releaseInterface(targetIntf)
+                connection.releaseInterface(audioIntf)
                 connection.close()
             }.start()
-        } catch (e: Exception) {
-            tvStatus.text = "Error: ${e.message}"
+        } else {
+            tvStatus.text = "Gagal nemu Endpoint OUT.\nCoba cabut colok DAC."
+            connection.close()
         }
     }
 }
