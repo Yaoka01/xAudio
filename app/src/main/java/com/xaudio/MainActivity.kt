@@ -93,7 +93,7 @@ class MainActivity : AppCompatActivity() {
                             
                             // Cek apakah ini Isochronous (Realtime) dan arahnya OUT (ke DAC)
                             if (ep.direction == UsbConstants.USB_DIR_OUT && ep.type == UsbConstants.USB_ENDPOINT_XFER_ISOC) {
-                                audioEndpointAddress = ep.endpointAddress
+                                audioEndpointAddress = ep.address
                                 targetInterface = intf
                                 logInfo.append("   [!] Endpoint Audio OUT: $audioEndpointAddress\n")
                                 logInfo.append("   Max Packet Size: ${ep.maxPacketSize} bytes\n")
